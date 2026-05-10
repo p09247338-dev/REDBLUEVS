@@ -622,12 +622,13 @@ local function updatePlayerEsp()
         if not e.hpBar  then e.hpBar = safeDrawing("Line"); e.hpBar.Thickness = 3 end
         if not e.hpBg   then e.hpBg = safeDrawing("Line"); e.hpBg.Color = CLR_HP_BG; e.hpBg.Thickness = 3 end
 
-        local headSp, onScreen = cam:WorldToViewportPoint(head.Position + Vector3.new(0, 0.6, 0))
+        local headSp, _ = cam:WorldToViewportPoint(head.Position + Vector3.new(0, 0.6, 0))
         local hrpSp = cam:WorldToViewportPoint(hrp.Position)
         local footPos = (foot and foot.Position) or (hrp.Position - Vector3.new(0, 3, 0))
         local footSp = cam:WorldToViewportPoint(footPos)
+        local inFront = headSp.Z > 0 and hrpSp.Z > 0 and footSp.Z > 0
 
-        if onScreen then
+        if inFront then
             local boxH = math.abs(footSp.Y - headSp.Y)
             local boxW = boxH * 0.55
             local cx = hrpSp.X
@@ -851,11 +852,8 @@ local function installNamecallHook()
     return ok and _origNamecall ~= nil
 end
 
-if installRaycastHook() then
-    _hookActive = true
-elseif installNamecallHook() then
-    _hookActive = true
-end
+if installRaycastHook() then _hookActive = true end
+if installNamecallHook() then _hookActive = true end
 
 local _noShadowConn = nil
 applyNoShadow = function(enable)
