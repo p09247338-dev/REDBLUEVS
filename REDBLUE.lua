@@ -19,23 +19,18 @@ local espHealth   = true
 local espDistance = true
 local espWeapon   = false
 
-local aimbotEnabled    = false
-local aimbotWallcheck  = false
-local aimbotFovCircle  = true
-local aimbotFov        = 200
-local aimbotDistance   = 500
-local aimbotSmoothness = 10
-
-local hitboxExpEnabled = false
-local hitboxExpSize    = 5
+local silentEnabled   = false
+local silentWallcheck = false
+local silentFovCircle = true
+local silentFov       = 200
+local silentDistance  = 500
 
 local teamCheckEnabled = false
 
-local noGrassEnabled    = false
 local noShadowEnabled   = false
 local fullBrightEnabled = false
 
-local applyNoGrass, applyNoShadow
+local applyNoShadow
 
 local menuOpen = true
 
@@ -463,18 +458,13 @@ selectTab("Combat")
 local toggles = {}
 local sliders = {}
 
-local cbAim = makeGroupbox(tabs.Combat.content, "left", "aimbot")
-toggles.aimbotEnabled    = makeToggle(cbAim, "enabled",    false, function(v) aimbotEnabled = v end)
-toggles.aimbotWallcheck  = makeToggle(cbAim, "wall check", false, function(v) aimbotWallcheck = v end)
-toggles.teamCheckEnabled = makeToggle(cbAim, "team check", false, function(v) teamCheckEnabled = v end)
-toggles.aimbotFovCircle  = makeToggle(cbAim, "fov circle", true,  function(v) aimbotFovCircle = v end)
-sliders.aimbotFov        = makeSlider(cbAim, "fov",         50,  500,  200, function(v) aimbotFov = v end)
-sliders.aimbotDistance   = makeSlider(cbAim, "distance",    50, 1000,  500, function(v) aimbotDistance = v end)
-sliders.aimbotSmoothness = makeSlider(cbAim, "smoothness",   1,  100,   10, function(v) aimbotSmoothness = v end)
-
-local cbHit = makeGroupbox(tabs.Combat.content, "right", "hitbox expander")
-toggles.hitboxExpEnabled = makeToggle(cbHit, "enabled", false, function(v) hitboxExpEnabled = v end)
-sliders.hitboxExpSize    = makeSlider(cbHit, "size",    1, 30, 5, function(v) hitboxExpSize = v end)
+local cbSilent = makeGroupbox(tabs.Combat.content, "left", "silent aim")
+toggles.silentEnabled    = makeToggle(cbSilent, "enabled",    false, function(v) silentEnabled = v end)
+toggles.silentWallcheck  = makeToggle(cbSilent, "wall check", false, function(v) silentWallcheck = v end)
+toggles.teamCheckEnabled = makeToggle(cbSilent, "team check", false, function(v) teamCheckEnabled = v end)
+toggles.silentFovCircle  = makeToggle(cbSilent, "fov circle", true,  function(v) silentFovCircle = v end)
+sliders.silentFov        = makeSlider(cbSilent, "fov",         50,  500,  200, function(v) silentFov = v end)
+sliders.silentDistance   = makeSlider(cbSilent, "distance",    50, 1000,  500, function(v) silentDistance = v end)
 
 local visEsp = makeGroupbox(tabs.Visuals.content, "left", "esp — players")
 toggles.espEnabled  = makeToggle(visEsp, "enabled",  false, function(v) espEnabled = v end)
@@ -491,9 +481,6 @@ sliders.fovValue = makeSlider(othCam, "fov", 1, 120, 70, function(v) fovValue = 
 local wldLight = makeGroupbox(tabs.World.content, "left", "lighting")
 toggles.fullBrightEnabled = makeToggle(wldLight, "fullbright",  false, function(v) fullBrightEnabled = v end)
 toggles.noShadowEnabled   = makeToggle(wldLight, "no shadow",   false, function(v) noShadowEnabled = v;   if applyNoShadow then applyNoShadow(v) end end)
-
-local wldTerrain = makeGroupbox(tabs.World.content, "right", "terrain")
-toggles.noGrassEnabled    = makeToggle(wldTerrain, "no grass",  false, function(v) noGrassEnabled = v;    if applyNoGrass  then applyNoGrass(v)  end end)
 
 local mobileBtn = Instance.new("TextButton")
 mobileBtn.Name = "MobileToggle"
@@ -576,12 +563,6 @@ end
 
 local function isTeammate(p)
     if not teamCheckEnabled then return false end
-    if not p or p == plr then return false end
-    if not plr.Team or not p.Team then return false end
-    return p.Team == plr.Team
-end
-
-local function isSameTeam(p)
     if not p or p == plr then return false end
     if not plr.Team or not p.Team then return false end
     return p.Team == plr.Team
@@ -727,11 +708,10 @@ local function isVisible(targetPart)
     return result.Instance and result.Instance:IsDescendantOf(targetPart.Parent)
 end
 
-local function findAimbotTarget()
+local function findSilentTarget()
     local cam = Workspace.CurrentCamera
     if not cam then return nil end
     local lhrp = getHrp(plr.Character)
-    if not lhrp then return nil end
     local screenCenter = Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
     local bestTarget, bestScore = nil, math.huge
     for _, p in ipairs(iteratePlayers()) do
@@ -740,17 +720,17 @@ local function findAimbotTarget()
         if char then
             local hum = char:FindFirstChildOfClass("Humanoid")
             if not hum or hum.Health > 0 then
-                local head = getHead(char)
-                if head then
-                    local dist = (head.Position - lhrp.Position).Magnitude
-                    if dist <= aimbotDistance then
-                        local sp, onScreen = cam:WorldToViewportPoint(head.Position)
+                local aim = getHrp(char) or getHead(char)
+                if aim then
+                    local dist = lhrp and (aim.Position - lhrp.Position).Magnitude or 0
+                    if dist <= silentDistance then
+                        local sp, onScreen = cam:WorldToViewportPoint(aim.Position)
                         if onScreen and sp.Z > 0 then
                             local d2 = (Vector2.new(sp.X, sp.Y) - screenCenter).Magnitude
-                            if d2 <= aimbotFov and d2 < bestScore then
-                                if not aimbotWallcheck or isVisible(head) then
+                            if d2 <= silentFov and d2 < bestScore then
+                                if not silentWallcheck or isVisible(aim) then
                                     bestScore = d2
-                                    bestTarget = head
+                                    bestTarget = aim
                                 end
                             end
                         end
@@ -762,15 +742,25 @@ local function findAimbotTarget()
     return bestTarget
 end
 
-local function updateAimbot()
-    if not aimbotEnabled then return end
-    local cam = Workspace.CurrentCamera
-    if not cam then return end
-    local target = findAimbotTarget()
-    if not target then return end
-    local desired = CFrame.new(cam.CFrame.Position, target.Position)
-    local alpha = math.clamp(1 / math.max(aimbotSmoothness, 1), 0, 1)
-    cam.CFrame = cam.CFrame:Lerp(desired, alpha)
+local function predictedTargetPos(part)
+    if not part then return nil end
+    local pos = part.Position
+    local vel
+    pcall(function() vel = part.AssemblyLinearVelocity end)
+    if vel and vel.Magnitude > 0 then
+        return pos + vel * 0.08
+    end
+    return pos
+end
+
+local currentSilentTarget = nil
+
+local function updateSilentTarget()
+    if not silentEnabled then
+        currentSilentTarget = nil
+        return
+    end
+    currentSilentTarget = findSilentTarget()
 end
 
 local fovCircle = nil
@@ -783,11 +773,11 @@ local function updateFovCircle()
         fovCircle.Thickness = 1
         fovCircle.Transparency = 1
     end
-    if aimbotEnabled and aimbotFovCircle then
+    if silentEnabled and silentFovCircle then
         local cam = Workspace.CurrentCamera
         if cam then
             fovCircle.Position = Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
-            fovCircle.Radius = aimbotFov
+            fovCircle.Radius = silentFov
             fovCircle.Visible = true
         end
     else
@@ -795,85 +785,36 @@ local function updateFovCircle()
     end
 end
 
-local hitboxOriginals = {}
+local MIN_RAY_LENGTH = 30
 
-local function restoreHitboxFor(part)
-    local orig = hitboxOriginals[part]
-    if not orig then return end
-    pcall(function()
-        if part.Parent then
-            part.Size         = orig.size
-            part.Transparency = orig.transp
-            part.CanCollide   = orig.cancol
-            part.Massless     = orig.massless
-        end
-    end)
-    hitboxOriginals[part] = nil
+local function shouldRedirect(direction)
+    if typeof(direction) ~= "Vector3" then return false end
+    if direction.Magnitude < MIN_RAY_LENGTH then return false end
+    return true
 end
 
-local function restoreAllHitboxes()
-    for part in pairs(hitboxOriginals) do
-        restoreHitboxFor(part)
-    end
-end
+local _origRaycast = nil
+local _hookActive = false
 
-local function expandHitboxFor(part)
-    if not part or not part:IsA("BasePart") or not part.Parent then return end
-    if not hitboxOriginals[part] then
-        hitboxOriginals[part] = {
-            size     = part.Size,
-            transp   = part.Transparency,
-            cancol   = part.CanCollide,
-            massless = part.Massless,
-        }
-    end
-    local s = hitboxExpSize
-    pcall(function()
-        part.Size = Vector3.new(s, s, s)
-        part.Transparency = 0.7
-        part.CanCollide = false
-        part.Massless = true
-    end)
-end
-
-local function updateHitboxes()
-    if not hitboxExpEnabled then
-        if next(hitboxOriginals) then restoreAllHitboxes() end
-        return
-    end
-    local touched = {}
-    for _, p in ipairs(iteratePlayers()) do
-        if not isSameTeam(p) then
-            local char = p.Character
-            local hrp = char and getHrp(char)
-            if hrp then
-                expandHitboxFor(hrp)
-                touched[hrp] = true
+local function installRaycastHook()
+    if type(hookfunction) ~= "function" then return false end
+    local ok = pcall(function()
+        _origRaycast = hookfunction(Workspace.Raycast, function(self, origin, direction, params)
+            if silentEnabled and currentSilentTarget and self == Workspace
+                and typeof(origin) == "Vector3" and shouldRedirect(direction) then
+                local targetPos = predictedTargetPos(currentSilentTarget)
+                if targetPos then
+                    direction = (targetPos - origin).Unit * direction.Magnitude
+                end
             end
-        end
-    end
-    for part in pairs(hitboxOriginals) do
-        if not touched[part] then restoreHitboxFor(part) end
-    end
+            return _origRaycast(self, origin, direction, params)
+        end)
+    end)
+    return ok and _origRaycast ~= nil
 end
 
-local _defaultGrass = nil
-do
-    local terrain = Workspace:FindFirstChildOfClass("Terrain")
-    if terrain and gethiddenproperty then
-        local ok, val = pcall(gethiddenproperty, terrain, "Decoration")
-        if ok then _defaultGrass = val else _defaultGrass = false end
-    end
-end
-
-applyNoGrass = function(enable)
-    local terrain = Workspace:FindFirstChildOfClass("Terrain")
-    if not terrain or not sethiddenproperty then return end
-    if enable then
-        pcall(sethiddenproperty, terrain, "Decoration", false)
-    else
-        pcall(sethiddenproperty, terrain, "Decoration", _defaultGrass and true or false)
-    end
+if installRaycastHook() then
+    _hookActive = true
 end
 
 local _noShadowConn = nil
@@ -981,17 +922,12 @@ end)
 RS.RenderStepped:Connect(function()
     if _G.__caydexx_ts_unloaded then return end
     pcall(updatePlayerEsp)
-    pcall(updateAimbot)
+    pcall(updateSilentTarget)
     pcall(updateFovCircle)
     if fovEnabled then
         local cam = Workspace.CurrentCamera
         if cam then pcall(function() cam.FieldOfView = fovValue end) end
     end
-end)
-
-RS.Heartbeat:Connect(function()
-    if _G.__caydexx_ts_unloaded then return end
-    pcall(updateHitboxes)
 end)
 
 _G.__caydexx_ts_unload = function()
@@ -1000,16 +936,13 @@ _G.__caydexx_ts_unload = function()
 
     fovEnabled = false
     espEnabled = false
-    aimbotEnabled = false
-    hitboxExpEnabled = false
-    noGrassEnabled = false
+    silentEnabled = false
+    currentSilentTarget = nil
     noShadowEnabled = false
     fullBrightEnabled = false
 
     clearAllPlayerEsp()
-    restoreAllHitboxes()
     if fovCircle then pcall(function() fovCircle:Remove() end) end
-    pcall(function() applyNoGrass(false) end)
     pcall(function() applyNoShadow(false) end)
     pcall(restoreFullBright)
 
