@@ -793,13 +793,18 @@ local function shouldRedirect(direction)
     return true
 end
 
+local _hookFn      = rawget(getfenv(0), "hookfunction") or rawget(getfenv(0), "hookfunc") or rawget(getfenv(0), "replaceclosure")
+local _hookMM      = rawget(getfenv(0), "hookmetamethod")
+local _getNCMethod = rawget(getfenv(0), "getnamecallmethod") or rawget(getfenv(0), "get_namecall_method")
+
 local _origRaycast = nil
+local _origNamecall = nil
 local _hookActive = false
 
 local function installRaycastHook()
-    if type(hookfunction) ~= "function" then return false end
+    if type(_hookFn) ~= "function" then return false end
     local ok = pcall(function()
-        _origRaycast = hookfunction(Workspace.Raycast, function(self, origin, direction, params)
+        _origRaycast = _hookFn(Workspace.Raycast, function(self, origin, direction, params)
             if silentEnabled and currentSilentTarget and self == Workspace
                 and typeof(origin) == "Vector3" and shouldRedirect(direction) then
                 local targetPos = predictedTargetPos(currentSilentTarget)
@@ -813,7 +818,42 @@ local function installRaycastHook()
     return ok and _origRaycast ~= nil
 end
 
+local function installNamecallHook()
+    if type(_hookMM) ~= "function" or type(_getNCMethod) ~= "function" then return false end
+    local ok = pcall(function()
+        _origNamecall = _hookMM(game, "__namecall", function(self, ...)
+            if not silentEnabled or not currentSilentTarget or self ~= Workspace then
+                return _origNamecall(self, ...)
+            end
+            local m = _getNCMethod()
+            if m == "Raycast" then
+                local origin, direction, params = ...
+                if typeof(origin) == "Vector3" and shouldRedirect(direction) then
+                    local targetPos = predictedTargetPos(currentSilentTarget)
+                    if targetPos then
+                        direction = (targetPos - origin).Unit * direction.Magnitude
+                        return _origNamecall(self, origin, direction, params)
+                    end
+                end
+            elseif m == "FindPartOnRay" or m == "FindPartOnRayWithIgnoreList" or m == "FindPartOnRayWithWhitelist" then
+                local ray, ignore, terrain = ...
+                if typeof(ray) == "Ray" and shouldRedirect(ray.Direction) then
+                    local targetPos = predictedTargetPos(currentSilentTarget)
+                    if targetPos then
+                        local newDir = (targetPos - ray.Origin).Unit * ray.Direction.Magnitude
+                        return _origNamecall(self, Ray.new(ray.Origin, newDir), ignore, terrain)
+                    end
+                end
+            end
+            return _origNamecall(self, ...)
+        end)
+    end)
+    return ok and _origNamecall ~= nil
+end
+
 if installRaycastHook() then
+    _hookActive = true
+elseif installNamecallHook() then
     _hookActive = true
 end
 
