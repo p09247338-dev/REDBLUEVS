@@ -581,6 +581,12 @@ local function isTeammate(p)
     return p.Team == plr.Team
 end
 
+local function isSameTeam(p)
+    if not p or p == plr then return false end
+    if not plr.Team or not p.Team then return false end
+    return p.Team == plr.Team
+end
+
 local CLR_WHITE  = Color3.fromRGB(255, 255, 255)
 local CLR_YELLOW = Color3.fromRGB(255, 220, 100)
 local CLR_BLACK  = Color3.fromRGB(0, 0, 0)
@@ -837,7 +843,7 @@ local function updateHitboxes()
     end
     local touched = {}
     for _, p in ipairs(iteratePlayers()) do
-        if not isTeammate(p) then
+        if not isSameTeam(p) then
             local char = p.Character
             local hrp = char and getHrp(char)
             if hrp then
