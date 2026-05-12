@@ -20,7 +20,7 @@ local espDistance = true
 local espWeapon   = false
 
 local silentEnabled   = false
-local silentWallcheck = false
+local silentWallcheck = true
 local silentFovCircle = true
 local silentFov       = 200
 local silentDistance  = 500
@@ -29,6 +29,13 @@ local teamCheckEnabled = false
 
 local noShadowEnabled   = false
 local fullBrightEnabled = false
+
+local flyEnabled    = false
+local flySpeed      = 50
+local speedEnabled  = false
+local speedValue    = 30
+local noclipEnabled = false
+local infJumpEnabled = false
 
 local applyNoShadow
 
@@ -204,7 +211,7 @@ local function selectTab(name)
     end
 end
 
-local tabNames = {"Combat", "Visuals", "Other", "World"}
+local tabNames = {"Combat", "Visuals", "Movement", "Other", "World"}
 local tabBtnW = 72
 for i, name in ipairs(tabNames) do
     local btn = Instance.new("TextButton")
@@ -460,7 +467,7 @@ local sliders = {}
 
 local cbSilent = makeGroupbox(tabs.Combat.content, "left", "silent aim")
 toggles.silentEnabled    = makeToggle(cbSilent, "enabled",    false, function(v) silentEnabled = v end)
-toggles.silentWallcheck  = makeToggle(cbSilent, "wall check", false, function(v) silentWallcheck = v end)
+toggles.silentWallcheck  = makeToggle(cbSilent, "wall check", true,  function(v) silentWallcheck = v end)
 toggles.teamCheckEnabled = makeToggle(cbSilent, "team check", false, function(v) teamCheckEnabled = v end)
 toggles.silentFovCircle  = makeToggle(cbSilent, "fov circle", true,  function(v) silentFovCircle = v end)
 sliders.silentFov        = makeSlider(cbSilent, "fov",         50,  500,  200, function(v) silentFov = v end)
@@ -481,6 +488,16 @@ sliders.fovValue = makeSlider(othCam, "fov", 1, 120, 70, function(v) fovValue = 
 local wldLight = makeGroupbox(tabs.World.content, "left", "lighting")
 toggles.fullBrightEnabled = makeToggle(wldLight, "fullbright",  false, function(v) fullBrightEnabled = v end)
 toggles.noShadowEnabled   = makeToggle(wldLight, "no shadow",   false, function(v) noShadowEnabled = v;   if applyNoShadow then applyNoShadow(v) end end)
+
+local mvLeft = makeGroupbox(tabs.Movement.content, "left", "fly / speed")
+toggles.flyEnabled   = makeToggle(mvLeft, "fly",         false, function(v) flyEnabled = v end)
+sliders.flySpeed     = makeSlider(mvLeft, "fly speed",   10, 300, 50, function(v) flySpeed = v end)
+toggles.speedEnabled = makeToggle(mvLeft, "walk speed",  false, function(v) speedEnabled = v end)
+sliders.speedValue   = makeSlider(mvLeft, "walk speed",  16, 200, 30, function(v) speedValue = v end)
+
+local mvRight = makeGroupbox(tabs.Movement.content, "right", "misc")
+toggles.noclipEnabled  = makeToggle(mvRight, "noclip",   false, function(v) noclipEnabled = v end)
+toggles.infJumpEnabled = makeToggle(mvRight, "inf jump", false, function(v) infJumpEnabled = v end)
 
 local mobileBtn = Instance.new("TextButton")
 mobileBtn.Name = "MobileToggle"
@@ -721,7 +738,7 @@ local function findSilentTarget()
         if char then
             local hum = char:FindFirstChildOfClass("Humanoid")
             if not hum or hum.Health > 0 then
-                local aim = getHrp(char) or getHead(char)
+                local aim = getHead(char) or getHrp(char)
                 if aim then
                     local dist = lhrp and (aim.Position - lhrp.Position).Magnitude or 0
                     if dist <= silentDistance then
@@ -774,19 +791,17 @@ local function updateFovCircle()
         fovCircle.Thickness = 1
         fovCircle.Transparency = 1
     end
-    if silentEnabled and silentFovCircle then
-        local cam = Workspace.CurrentCamera
-        if cam then
-            fovCircle.Position = Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
-            fovCircle.Radius = silentFov
-            fovCircle.Visible = true
-        end
+    local cam = Workspace.CurrentCamera
+    if silentEnabled and silentFovCircle and cam then
+        fovCircle.Position = Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
+        fovCircle.Radius = silentFov
+        fovCircle.Visible = true
     else
         fovCircle.Visible = false
     end
 end
 
-local MIN_RAY_LENGTH = 30
+local MIN_RAY_LENGTH = 1
 
 local function shouldRedirect(direction)
     if typeof(direction) ~= "Vector3" then return false end
@@ -794,26 +809,30 @@ local function shouldRedirect(direction)
     return true
 end
 
-local _hookFn      = rawget(getfenv(0), "hookfunction") or rawget(getfenv(0), "hookfunc") or rawget(getfenv(0), "replaceclosure")
-local _hookMM      = rawget(getfenv(0), "hookmetamethod")
-local _getNCMethod = rawget(getfenv(0), "getnamecallmethod") or rawget(getfenv(0), "get_namecall_method")
+local _hookFn      = hookfunction or hookfunc or replaceclosure
+local _hookMM      = hookmetamethod
+local _getNCMethod = getnamecallmethod or get_namecall_method
 
 local _origRaycast = nil
 local _origNamecall = nil
 local _hookActive = false
 
+local function silentRedirect(self, origin, direction)
+    if not (silentEnabled and currentSilentTarget and self == Workspace) then return direction end
+    if typeof(origin) ~= "Vector3" or typeof(direction) ~= "Vector3" then return direction end
+    if not shouldRedirect(direction) then return direction end
+    local targetPos = predictedTargetPos(currentSilentTarget)
+    if targetPos then
+        return (targetPos - origin).Unit * direction.Magnitude
+    end
+    return direction
+end
+
 local function installRaycastHook()
     if type(_hookFn) ~= "function" then return false end
     local ok = pcall(function()
         _origRaycast = _hookFn(Workspace.Raycast, function(self, origin, direction, params)
-            if silentEnabled and currentSilentTarget and self == Workspace
-                and typeof(origin) == "Vector3" and shouldRedirect(direction) then
-                local targetPos = predictedTargetPos(currentSilentTarget)
-                if targetPos then
-                    direction = (targetPos - origin).Unit * direction.Magnitude
-                end
-            end
-            return _origRaycast(self, origin, direction, params)
+            return _origRaycast(self, origin, silentRedirect(self, origin, direction), params)
         end)
     end)
     return ok and _origRaycast ~= nil
@@ -829,21 +848,9 @@ local function installNamecallHook()
             local m = _getNCMethod()
             if m == "Raycast" then
                 local origin, direction, params = ...
-                if typeof(origin) == "Vector3" and shouldRedirect(direction) then
-                    local targetPos = predictedTargetPos(currentSilentTarget)
-                    if targetPos then
-                        direction = (targetPos - origin).Unit * direction.Magnitude
-                        return _origNamecall(self, origin, direction, params)
-                    end
-                end
-            elseif m == "FindPartOnRay" or m == "FindPartOnRayWithIgnoreList" or m == "FindPartOnRayWithWhitelist" then
-                local ray, ignore, terrain = ...
-                if typeof(ray) == "Ray" and shouldRedirect(ray.Direction) then
-                    local targetPos = predictedTargetPos(currentSilentTarget)
-                    if targetPos then
-                        local newDir = (targetPos - ray.Origin).Unit * ray.Direction.Magnitude
-                        return _origNamecall(self, Ray.new(ray.Origin, newDir), ignore, terrain)
-                    end
+                local newDir = silentRedirect(self, origin, direction)
+                if newDir ~= direction then
+                    return _origNamecall(self, origin, newDir, params)
                 end
             end
             return _origNamecall(self, ...)
@@ -948,6 +955,116 @@ local function restoreFullBright()
     end
 end
 
+local function getCharParts()
+    local char = plr.Character
+    if not char then return nil, nil, nil end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    return char, hrp, hum
+end
+
+local _flyBV = nil
+local _flyBG = nil
+local _noclipModified = {}
+local _origWalkSpeed = nil
+
+local function stopFly()
+    if _flyBV then pcall(function() _flyBV:Destroy() end); _flyBV = nil end
+    if _flyBG then pcall(function() _flyBG:Destroy() end); _flyBG = nil end
+end
+
+local function startFly(hrp)
+    stopFly()
+    _flyBV = Instance.new("BodyVelocity")
+    _flyBV.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+    _flyBV.Velocity = Vector3.new(0, 0, 0)
+    _flyBV.Parent = hrp
+    _flyBG = Instance.new("BodyGyro")
+    _flyBG.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+    _flyBG.P = 1e4
+    _flyBG.D = 500
+    _flyBG.CFrame = hrp.CFrame
+    _flyBG.Parent = hrp
+end
+
+local function updateFly()
+    if not flyEnabled then
+        if _flyBV or _flyBG then stopFly() end
+        return
+    end
+    local char, hrp, hum = getCharParts()
+    if not char or not hrp or not hum then return end
+    if not _flyBV or _flyBV.Parent ~= hrp then startFly(hrp) end
+    if not _flyBV then return end
+    local cam = Workspace.CurrentCamera
+    if not cam then return end
+    local camCF = cam.CFrame
+    local move = hum.MoveDirection
+    local fwdAmt, rgtAmt = 0, 0
+    if move.Magnitude > 0.01 then
+        local fwdFlat = Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z)
+        if fwdFlat.Magnitude > 0 then fwdFlat = fwdFlat.Unit end
+        local rgtFlat = Vector3.new(camCF.RightVector.X, 0, camCF.RightVector.Z)
+        if rgtFlat.Magnitude > 0 then rgtFlat = rgtFlat.Unit end
+        fwdAmt = move:Dot(fwdFlat)
+        rgtAmt = move:Dot(rgtFlat)
+    end
+    local velocity = camCF.LookVector * fwdAmt * flySpeed + camCF.RightVector * rgtAmt * flySpeed
+    local upInput = 0
+    if UIS:IsKeyDown(Enum.KeyCode.Space) or hum.Jump then upInput = upInput + 1 end
+    if UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.LeftShift) then upInput = upInput - 1 end
+    velocity = velocity + Vector3.new(0, upInput * flySpeed, 0)
+    _flyBV.Velocity = velocity
+    _flyBG.CFrame = camCF
+end
+
+local function updateSpeed()
+    local _, _, hum = getCharParts()
+    if not hum then return end
+    if speedEnabled then
+        if _origWalkSpeed == nil then _origWalkSpeed = hum.WalkSpeed end
+        if hum.WalkSpeed ~= speedValue then
+            pcall(function() hum.WalkSpeed = speedValue end)
+        end
+    else
+        if _origWalkSpeed ~= nil then
+            pcall(function() hum.WalkSpeed = _origWalkSpeed end)
+            _origWalkSpeed = nil
+        end
+    end
+end
+
+local function updateNoclip()
+    local char = plr.Character
+    if not char then return end
+    if noclipEnabled then
+        for _, p in ipairs(char:GetDescendants()) do
+            if p:IsA("BasePart") and p.CanCollide then
+                p.CanCollide = false
+                _noclipModified[p] = true
+            end
+        end
+    elseif next(_noclipModified) then
+        for p in pairs(_noclipModified) do
+            if p and p.Parent then pcall(function() p.CanCollide = true end) end
+        end
+        _noclipModified = {}
+    end
+end
+
+UIS.JumpRequest:Connect(function()
+    if _G.__caydexx_ts_unloaded or not infJumpEnabled then return end
+    local _, _, hum = getCharParts()
+    if hum then pcall(function() hum:ChangeState(Enum.HumanoidStateType.Jumping) end) end
+end)
+
+plr.CharacterAdded:Connect(function()
+    _origWalkSpeed = nil
+    _noclipModified = {}
+    _flyBV = nil
+    _flyBG = nil
+end)
+
 RS.Heartbeat:Connect(function()
     if _G.__caydexx_ts_unloaded then return end
     if fullBrightEnabled then
@@ -955,6 +1072,9 @@ RS.Heartbeat:Connect(function()
     elseif _fbOriginal or _fbAtmoOriginal then
         restoreFullBright()
     end
+    pcall(updateFly)
+    pcall(updateSpeed)
+    pcall(updateNoclip)
 end)
 
 RS.RenderStepped:Connect(function()
@@ -978,11 +1098,18 @@ _G.__caydexx_ts_unload = function()
     currentSilentTarget = nil
     noShadowEnabled = false
     fullBrightEnabled = false
+    flyEnabled = false
+    speedEnabled = false
+    noclipEnabled = false
+    infJumpEnabled = false
 
     clearAllPlayerEsp()
     if fovCircle then pcall(function() fovCircle:Remove() end) end
     pcall(function() applyNoShadow(false) end)
     pcall(restoreFullBright)
+    pcall(stopFly)
+    pcall(updateSpeed)
+    pcall(updateNoclip)
 
     pcall(function() sg:Destroy() end)
 end
